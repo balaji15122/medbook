@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import http from "http";
 import { Server } from "socket.io";
-import videoCallSocket from "./sockets/videoCallSocket.js";
+import streamSocket from "./sockets/streamSocket.js";
 
 // Import route handlers
 import authRoutes from "./routes/authRoutes.js";
@@ -120,7 +120,7 @@ const io = new Server(server, {
 });
 
 // Configure Video Call sockets
-videoCallSocket(io);
+streamSocket(io);
 
 // Start Server
 server.listen(PORT, () => {
