@@ -541,10 +541,16 @@ export const getJoinToken = async (req, res) => {
     const [startHours, startMinutes] = appointment.startTime.split(":").map(Number);
     const [endHours, endMinutes] = appointment.endTime.split(":").map(Number);
 
+    // Default client timezone offset to -330 (IST, UTC+5:30) if not provided by query
+    const clientOffset = req.query.offset ? Number(req.query.offset) : -330;
+
+    // Shift apptDate to extract correct local date components (correcting UTC timezone shifts)
+    const clientLocalAppt = new Date(apptDate.getTime() - (clientOffset * 60 * 1000));
+
     const startTimeDate = new Date(Date.UTC(
-      apptDate.getUTCFullYear(),
-      apptDate.getUTCMonth(),
-      apptDate.getUTCDate(),
+      clientLocalAppt.getUTCFullYear(),
+      clientLocalAppt.getUTCMonth(),
+      clientLocalAppt.getUTCDate(),
       startHours,
       startMinutes,
       0,
@@ -552,9 +558,9 @@ export const getJoinToken = async (req, res) => {
     ));
 
     const endTimeDate = new Date(Date.UTC(
-      apptDate.getUTCFullYear(),
-      apptDate.getUTCMonth(),
-      apptDate.getUTCDate(),
+      clientLocalAppt.getUTCFullYear(),
+      clientLocalAppt.getUTCMonth(),
+      clientLocalAppt.getUTCDate(),
       endHours,
       endMinutes,
       0,
@@ -562,9 +568,6 @@ export const getJoinToken = async (req, res) => {
     ));
 
     const nowRaw = new Date();
-    // Default client timezone offset to -330 (IST, UTC+5:30) if not provided by query
-    const clientOffset = req.query.offset ? Number(req.query.offset) : -330;
-    
     // Shift nowRaw into a date object whose UTC values match the client's local time values
     const clientLocalTime = new Date(nowRaw.getTime() - (clientOffset * 60 * 1000));
     
