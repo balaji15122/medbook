@@ -3,16 +3,53 @@ import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, RefreshCw } from "
 import Loader from "../../components/common/Loader.jsx";
 import socketService from "../../services/socketService.js";
 
-// Multi-provider STUN/TURN server configuration for WebRTC NAT traversal
-const RTC_CONFIG = {
-  iceServers: [
+// --- ICE server configuration (STUN for peer discovery + TURN for relaying through NAT/firewalls) ---
+//
+// TURN is REQUIRED for reliable video on mobile data, college/office Wi-Fi and other
+// symmetric / carrier-grade NAT networks where plain STUN cannot open a direct path.
+// Without a TURN relay, WebRTC silently fails on those networks and the app is forced
+// onto the (much heavier) Socket.IO frame fallback every time.
+//
+// For production reliability, set YOUR OWN TURN credentials via Vite env vars:
+//   VITE_TURN_URLS=turn:your.turn.host:3478,turns:your.turn.host:5349?transport=tcp
+//   VITE_TURN_USERNAME=yourUsername
+//   VITE_TURN_CREDENTIAL=yourSecret
+// Free options: Metered (metered.ca, ~20GB/mo free tier) or Twilio Network Traversal Service.
+//
+// If no env TURN is configured, we fall back to the public OpenRelay TURN project as a
+// best effort. Public TURN is rate-limited and not guaranteed — configure your own for prod.
+const buildIceServers = () => {
+  const servers = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
-    // Backup public STUNs
-    { urls: "stun:stun.ekiga.net" },
-    { urls: "stun:stun.ideasip.com" },
-  ],
+  ];
+
+  const envUrls = import.meta.env.VITE_TURN_URLS;
+  const envUser = import.meta.env.VITE_TURN_USERNAME;
+  const envCred = import.meta.env.VITE_TURN_CREDENTIAL;
+
+  if (envUrls && envUser && envCred) {
+    servers.push({
+      urls: envUrls.split(",").map((u) => u.trim()).filter(Boolean),
+      username: envUser,
+      credential: envCred,
+    });
+  } else {
+    // Best-effort public TURN fallback (set your own via env for production).
+    servers.push(
+      { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+    );
+  }
+
+  return servers;
+};
+
+const RTC_CONFIG = {
+  iceServers: buildIceServers(),
+  iceCandidatePoolSize: 10,
 };
 
 export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
@@ -156,7 +193,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
           const inputBuffer = e.inputBuffer.getChannelData(0); // float32 PCM data
           const wavBuffer = encodeWAV(inputBuffer, audioContextRef.current.sampleRate);
           const base64Wav = arrayBufferToBase64(wavBuffer);
-          
+
           console.log(`Emitting stream_audio, size: ${base64Wav.length} chars`);
           socketRef.current?.emit("stream_audio", { streamId: appointmentId, audio: base64Wav });
         };
@@ -204,7 +241,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
 
       const arrayBuffer = base64ToArrayBuffer(base64Wav);
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-      
+
       const sourceNode = audioContextRef.current.createBufferSource();
       sourceNode.buffer = audioBuffer;
       sourceNode.connect(audioContextRef.current.destination);
@@ -251,7 +288,8 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
 
     pc.oniceconnectionstatechange = () => {
       console.log("ICE Connection State Change:", pc.iceConnectionState);
-      if (pc.iceConnectionState === "connected") {
+      // Some browsers report the offerer side as "completed" rather than "connected".
+      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
         setConnStatus("connected");
         stopFallbackBroadcasting();
       } else if (pc.iceConnectionState === "disconnected") {
@@ -301,12 +339,20 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
     }
   }, [createPeerConnection, startFallbackBroadcasting]);
 
-  // Reconnection action
+  // Reconnection action — tear down the stale/failed peer connection and negotiate a fresh one.
   const reconnectCall = useCallback(() => {
-    if (peerSocketIdRef.current) {
-      console.log("Retrying connection...");
-      initiateCall(peerSocketIdRef.current);
+    if (!peerSocketIdRef.current) return;
+    console.log("Manual retry: rebuilding peer connection...");
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.oniceconnectionstatechange = null;
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
     }
+    pendingCandidates.current = [];
+    setConnStatus("connecting");
+    initiateCall(peerSocketIdRef.current);
   }, [initiateCall]);
 
   // Media configuration initialization
@@ -352,7 +398,8 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
         const startWatchdog = () => {
           if (connectionWatchdog) clearTimeout(connectionWatchdog);
           connectionWatchdog = setTimeout(() => {
-            if (peerConnectionRef.current?.iceConnectionState !== "connected") {
+            const s = peerConnectionRef.current?.iceConnectionState;
+            if (s !== "connected" && s !== "completed") {
               console.warn("WebRTC connection timed out. Falling back to Socket.IO stream...");
               startFallbackBroadcasting();
             }
@@ -443,16 +490,21 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
         });
 
         // Fallback Listeners: receive frames and play them if WebRTC is not connected
+        const isWebRTCLive = () => {
+          const s = peerConnectionRef.current?.iceConnectionState;
+          return s === "connected" || s === "completed";
+        };
+
         socket.on("stream_frame", ({ senderSocketId, frame }) => {
           console.log(`Received stream_frame from ${senderSocketId}, size: ${frame?.length} chars`);
           // If WebRTC is currently connected, ignore incoming fallback frames
-          if (peerConnectionRef.current?.iceConnectionState === "connected") return;
+          if (isWebRTCLive()) return;
           setRemoteFrame(frame);
         });
 
         socket.on("stream_audio", ({ senderSocketId, audio }) => {
           console.log(`Received stream_audio from ${senderSocketId}, size: ${audio?.length} chars`);
-          if (peerConnectionRef.current?.iceConnectionState === "connected") return;
+          if (isWebRTCLive()) return;
           playAudioChunk(audio);
         });
 
@@ -473,10 +525,57 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
           }
         });
 
-        // Trigger room join signaling
-        const roomToken = sessionStorage.getItem(`roomToken_${appointmentId}`);
-        const roomId = `room_${appointmentId}`;
-        socket.emit("join-room", { roomId, token: roomToken });
+        // (Re)join the signaling room. This MUST run on every (re)connect: Socket.IO
+        // reconnects after any network blip with a BRAND NEW socket id, and the server
+        // only relays frames/signaling to sockets that are members of the room. If we
+        // don't rejoin, we keep emitting frames into a room we're no longer part of and
+        // receive nothing back — the call appears "stuck connecting" while still emitting.
+        const joinRoom = () => {
+          const roomToken = sessionStorage.getItem(`roomToken_${appointmentId}`);
+          const roomId = `room_${appointmentId}`;
+          if (!roomToken) {
+            console.error("Cannot join room: room token missing or expired.");
+            setConnStatus("failed");
+            return;
+          }
+          console.log("Emitting join-room for", roomId);
+          socket.emit("join-room", { roomId, token: roomToken });
+        };
+
+        // Tear down any stale peer connection so we can renegotiate cleanly after a reconnect.
+        const resetPeerStateForRejoin = () => {
+          if (peerConnectionRef.current) {
+            peerConnectionRef.current.onicecandidate = null;
+            peerConnectionRef.current.ontrack = null;
+            peerConnectionRef.current.oniceconnectionstatechange = null;
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+          }
+          pendingCandidates.current = [];
+          peerSocketIdRef.current = null;
+          setRemoteStream(null);
+          setRemoteFrame(null);
+        };
+
+        // Fired on the first connection AND on every automatic reconnection.
+        socket.on("connect", () => {
+          console.log("Socket (re)connected:", socket.id, "— rejoining room");
+          resetPeerStateForRejoin();
+          setConnStatus("connecting");
+          joinRoom();
+        });
+
+        // Surface transient drops in the UI; Socket.IO will auto-reconnect and fire "connect".
+        socket.on("disconnect", (reason) => {
+          console.warn("Socket disconnected:", reason, "— attempting to reconnect...");
+          setConnStatus("connecting");
+        });
+
+        // If the socket was already connected before these handlers were attached,
+        // the "connect" event won't fire again — so join immediately in that case.
+        if (socket.connected) {
+          joinRoom();
+        }
 
       } catch (err) {
         console.error("Error initializing local media stream or sockets:", err);
@@ -492,6 +591,8 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
       cleanUp();
       const socket = socketService.getSocket();
       if (socket) {
+        socket.off("connect");
+        socket.off("disconnect");
         socket.off("user-joined");
         socket.off("room-peers");
         socket.off("offer");
@@ -647,14 +748,14 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
                 connStatus === "connected"
                   ? "rgba(34, 197, 94, 0.2)"
                   : connStatus === "connecting"
-                  ? "rgba(234, 179, 8, 0.2)"
-                  : "rgba(239, 68, 68, 0.2)",
+                    ? "rgba(234, 179, 8, 0.2)"
+                    : "rgba(239, 68, 68, 0.2)",
               color:
                 connStatus === "connected"
                   ? "#22c55e"
                   : connStatus === "connecting"
-                  ? "#eab308"
-                  : "#ef4444",
+                    ? "#eab308"
+                    : "#ef4444",
             }}
           >
             <span
@@ -666,8 +767,8 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
                   connStatus === "connected"
                     ? "#22c55e"
                     : connStatus === "connecting"
-                    ? "#eab308"
-                    : "#ef4444",
+                      ? "#eab308"
+                      : "#ef4444",
               }}
             />
             {isFallbackActive ? "FALLBACK (SOCKET)" : connStatus.toUpperCase()}
