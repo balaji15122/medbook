@@ -36,7 +36,8 @@ export const appointmentService = {
   },
 
   getJoinToken: async (id) => {
-    return await api.get(`/appointments/${id}/join-token`);
+    const offset = new Date().getTimezoneOffset();
+    return await api.get(`/appointments/${id}/join-token?offset=${offset}`);
   },
 
   endVideoCall: async (id) => {

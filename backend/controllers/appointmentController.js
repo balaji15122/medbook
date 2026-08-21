@@ -562,13 +562,19 @@ export const getJoinToken = async (req, res) => {
     ));
 
     const nowRaw = new Date();
+    // Default client timezone offset to -330 (IST, UTC+5:30) if not provided by query
+    const clientOffset = req.query.offset ? Number(req.query.offset) : -330;
+    
+    // Shift nowRaw into a date object whose UTC values match the client's local time values
+    const clientLocalTime = new Date(nowRaw.getTime() - (clientOffset * 60 * 1000));
+    
     const now = new Date(Date.UTC(
-      nowRaw.getFullYear(),
-      nowRaw.getMonth(),
-      nowRaw.getDate(),
-      nowRaw.getHours(),
-      nowRaw.getMinutes(),
-      nowRaw.getSeconds(),
+      clientLocalTime.getUTCFullYear(),
+      clientLocalTime.getUTCMonth(),
+      clientLocalTime.getUTCDate(),
+      clientLocalTime.getUTCHours(),
+      clientLocalTime.getUTCMinutes(),
+      clientLocalTime.getUTCSeconds(),
       0
     ));
     const activeStart = new Date(startTimeDate.getTime() - JOIN_BUFFER_MINUTES * 60 * 1000);
