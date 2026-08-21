@@ -22,15 +22,16 @@ export default function streamSocket(io) {
           return;
         }
 
-        // Attach properties to socket object for tracking
+                // Attach properties to socket object for tracking
         socket.roomId = roomId;
         socket.userId = decoded.userId;
         socket.userRole = decoded.role;
+        socket.appointmentId = decoded.appointmentId || roomId.replace("room_", "");
 
         socket.join(roomId);
         // Also join the fallback stream relay room
-        socket.join(`stream_${roomId}`);
-        console.log(`User ${decoded.userId} (${decoded.role}) joined stream room: ${roomId}`);
+        socket.join(`stream_${socket.appointmentId}`);
+        console.log(`User ${decoded.userId} (${decoded.role}) joined stream room: ${roomId} and fallback stream_${socket.appointmentId}`);
 
         // Broadcast to other users in the room
         socket.to(roomId).emit("user-joined", {
@@ -110,9 +111,12 @@ export default function streamSocket(io) {
           role: socket.userRole,
         });
         socket.leave(socket.roomId);
-        socket.leave(`stream_${socket.roomId}`);
+        if (socket.appointmentId) {
+          socket.leave(`stream_${socket.appointmentId}`);
+        }
         console.log(`Socket ${socket.id} left room ${socket.roomId}`);
         socket.roomId = null;
+        socket.appointmentId = null;
       }
     });
 
