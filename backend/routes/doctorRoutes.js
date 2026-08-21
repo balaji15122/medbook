@@ -7,7 +7,7 @@ import {
   getDoctorAppointments,
   getDoctorStats,
 } from "../controllers/doctorController.js";
-import authMiddleware from "../middlewares/authMiddleware.js";
+import authMiddleware from "../middlewares/authMiddleWare.js";
 import roleMiddleware from "../middlewares/roleMiddleware.js";
 
 const router = express.Router();
