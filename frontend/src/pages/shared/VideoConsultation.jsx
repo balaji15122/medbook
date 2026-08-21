@@ -1,17 +1,48 @@
-import React, { useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import socketService from "../../services/socketService.js";
 import appointmentService from "../../services/appointmentService.js";
 import CameraStreamCanvas from "./CameraStreamCanvas.jsx";
+import LiveKitStream from "./LiveKitStream.jsx";
+import Loader from "../../components/common/Loader.jsx";
 
 export const VideoConsultation = () => {
   const { appointmentId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Initialize socket first
+  const [useLiveKit, setUseLiveKit] = useState(false);
+  const [liveKitToken, setLiveKitToken] = useState(null);
+  const [liveKitUrl, setLiveKitUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check streaming mode (LiveKit or P2P fallback)
   useEffect(() => {
+    const checkStreamingMode = async () => {
+      try {
+        const res = await appointmentService.getLiveKitToken(appointmentId);
+        if (res.success && res.isLiveKitConfigured) {
+          console.log("LiveKit is configured. Starting SFU stream...");
+          setLiveKitToken(res.token);
+          setLiveKitUrl(res.serverUrl);
+          setUseLiveKit(true);
+        } else {
+          console.log("LiveKit not configured. Falling back to Direct P2P...");
+        }
+      } catch (err) {
+        console.warn("Failed to check LiveKit status. Using default P2P:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkStreamingMode();
+  }, [appointmentId]);
+
+  // Initialize socket first (only for P2P/sockets mode, not needed for LiveKit)
+  useEffect(() => {
+    if (useLiveKit) return;
+
     const token = sessionStorage.getItem(`roomToken_${appointmentId}`);
     if (!token) {
       alert("Unauthorized access. Token not found.");
@@ -26,7 +57,7 @@ export const VideoConsultation = () => {
       console.log("Disconnecting socket service...");
       socketService.disconnect();
     };
-  }, [appointmentId, navigate, user]);
+  }, [appointmentId, navigate, user, useLiveKit]);
 
   // Handle call end
   const handleEndCall = async () => {
@@ -35,9 +66,11 @@ export const VideoConsultation = () => {
     }
 
     try {
-      const socket = socketService.getSocket();
-      if (socket) {
-        socket.emit("leave-room");
+      if (!useLiveKit) {
+        const socket = socketService.getSocket();
+        if (socket) {
+          socket.emit("leave-room");
+        }
       }
 
       await appointmentService.endVideoCall(appointmentId);
@@ -50,6 +83,24 @@ export const VideoConsultation = () => {
       navigate(user?.role === "doctor" ? "/doctor/appointments" : "/patient/appointments");
     }
   };
+
+  if (loading) {
+    return (
+      <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a" }}>
+        <Loader message="Initializing consultation room..." />
+      </div>
+    );
+  }
+
+  if (useLiveKit && liveKitToken) {
+    return (
+      <LiveKitStream
+        token={liveKitToken}
+        serverUrl={liveKitUrl}
+        onEndCall={handleEndCall}
+      />
+    );
+  }
 
   return (
     <div

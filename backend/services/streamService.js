@@ -71,12 +71,14 @@ class StreamService {
     const roomName = `room_${appointmentId}`;
     const participantName = userName || `user_${userId}`;
 
+    const isConfigured = !!process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_KEY !== "devkey";
     const token = generateLiveKitToken(roomName, participantName);
 
     return {
       token,
       roomName,
       serverUrl: process.env.LIVEKIT_URL || "ws://localhost:7880",
+      isLiveKitConfigured: isConfigured,
     };
   }
 }

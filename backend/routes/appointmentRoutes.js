@@ -9,6 +9,7 @@ import {
   cancelAppointment,
   completeAppointment,
   getJoinToken,
+  getLiveKitToken,
   endVideoCall,
 } from "../controllers/appointmentController.js";
 import authMiddleware from "../middlewares/authMiddleWare.js";
@@ -68,6 +69,13 @@ router.get(
   "/:id/join-token",
   authMiddleware,
   getJoinToken
+);
+
+// Get livekit-token for video consultation
+router.get(
+  "/:id/livekit-token",
+  authMiddleware,
+  getLiveKitToken
 );
 
 // End video call session

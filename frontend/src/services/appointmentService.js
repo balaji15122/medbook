@@ -40,6 +40,10 @@ export const appointmentService = {
     return await api.get(`/appointments/${id}/join-token?offset=${offset}`);
   },
 
+  getLiveKitToken: async (id) => {
+    return await api.get(`/appointments/${id}/livekit-token`);
+  },
+
   endVideoCall: async (id) => {
     return await api.put(`/appointments/${id}/end-call`);
   },

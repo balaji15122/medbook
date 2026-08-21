@@ -8,6 +8,7 @@ import { JOIN_BUFFER_MINUTES } from "../config/videoCallConfig.js";
 import { isSlotAvailable, getAvailableSlotsForDoctor } from "../services/appointmentService.js";
 import { createNotification, notifyAppointmentUpdate } from "../services/notificationService.js";
 import { sendAppointmentEmail } from "../services/emailService.js";
+import streamService from "../services/streamService.js";
 
 // ================= GET AVAILABLE SLOTS =================
 export const getAvailableSlots = async (req, res) => {
@@ -679,6 +680,27 @@ export const endVideoCall = async (req, res) => {
   }
 };
 
+export const getLiveKitToken = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const appointmentId = req.params.id;
+    const userName = req.user.name || `${req.user.role}_${userId}`;
+    const result = await streamService.getLiveKitToken(appointmentId, userId, userName);
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    console.error("Get LiveKit token error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate LiveKit token",
+      error: error.message,
+    });
+  }
+};
+
 export default {
   getAvailableSlots,
   bookAppointment,
@@ -689,5 +711,6 @@ export default {
   cancelAppointment,
   completeAppointment,
   getJoinToken,
+  getLiveKitToken,
   endVideoCall,
 };
