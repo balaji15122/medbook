@@ -33,6 +33,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
   const socketRef = useRef(null);
   const pendingCandidates = useRef([]);
   const peerSocketIdRef = useRef(null);
+  const localStreamRef = useRef(null); // Stable ref to prevent loop triggers
 
   // Audio Context and nodes for Web Audio API audio streaming
   const audioContextRef = useRef(null);
@@ -82,10 +83,11 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
       peerConnectionRef.current = null;
     }
 
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
     }
+    setLocalStream(null);
 
     setRemoteStream(null);
     setRemoteFrame(null);
@@ -99,11 +101,12 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
-  }, [localStream]);
+  }, []);
 
   // Start fallback broadcasting (drawing video to canvas and capturing audio via Web Audio API)
   const startFallbackBroadcasting = useCallback(() => {
-    if (!localStream) return;
+    const currentStream = localStreamRef.current;
+    if (!currentStream) return;
     console.log("Starting WebSockets fallback stream broadcasting...");
     setIsFallbackActive(true);
 
@@ -135,7 +138,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
         audioContextRef.current.resume();
       }
 
-      const audioTracks = localStream.getAudioTracks();
+      const audioTracks = currentStream.getAudioTracks();
       if (audioTracks.length > 0) {
         // Disconnect existing nodes if any
         if (scriptProcessorRef.current) scriptProcessorRef.current.disconnect();
@@ -165,7 +168,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
     } catch (err) {
       console.error("Web Audio API fallback setup failed:", err);
     }
-  }, [localStream, appointmentId]);
+  }, [appointmentId]);
 
   // Stop fallback broadcasting
   const stopFallbackBroadcasting = useCallback(() => {
@@ -260,15 +263,16 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
     };
 
     // Add local media tracks to peer connection
-    if (localStream) {
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
+    const currentStream = localStreamRef.current;
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => {
+        pc.addTrack(track, currentStream);
       });
     }
 
     peerConnectionRef.current = pc;
     return pc;
-  }, [localStream, startFallbackBroadcasting, stopFallbackBroadcasting]);
+  }, [startFallbackBroadcasting, stopFallbackBroadcasting]);
 
   // Initiate WebRTC Call
   const initiateCall = useCallback(async (targetSocketId) => {
@@ -329,6 +333,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
           return;
         }
 
+        localStreamRef.current = stream;
         setLocalStream(stream);
 
         const socket = socketService.getSocket();
@@ -510,24 +515,26 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
 
   // Toggle controls
   const toggleAudio = useCallback(() => {
-    if (localStream) {
-      const audioTracks = localStream.getAudioTracks();
+    const currentStream = localStreamRef.current;
+    if (currentStream) {
+      const audioTracks = currentStream.getAudioTracks();
       audioTracks.forEach((track) => {
         track.enabled = !track.enabled;
       });
       setIsAudioMuted((prev) => !prev);
     }
-  }, [localStream]);
+  }, []);
 
   const toggleVideo = useCallback(() => {
-    if (localStream) {
-      const videoTracks = localStream.getVideoTracks();
+    const currentStream = localStreamRef.current;
+    if (currentStream) {
+      const videoTracks = currentStream.getVideoTracks();
       videoTracks.forEach((track) => {
         track.enabled = !track.enabled;
       });
       setIsVideoMuted((prev) => !prev);
     }
-  }, [localStream]);
+  }, []);
 
   const switchCamera = useCallback(() => {
     setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
