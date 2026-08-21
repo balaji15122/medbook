@@ -7,7 +7,7 @@ import {
   getMyPayments,
   getDoctorEarnings,
   getPaymentById,
-} from '../controllers/paymentController.js';
+} from '../controllers/PaymentController.js';
 import authMiddleware from '../middlewares/authMiddleWare.js';
 import roleMiddleware from '../middlewares/roleMiddleware.js';
 

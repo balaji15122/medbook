@@ -122,6 +122,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
         context.drawImage(localVideoRef.current, 0, 0, canvas.width, canvas.height);
         try {
           const dataUrl = canvas.toDataURL("image/jpeg", 0.80);
+          console.log(`Emitting stream_frame, size: ${dataUrl.length} chars`);
           socketRef.current?.emit("stream_frame", { streamId: appointmentId, frame: dataUrl });
         } catch (err) {
           console.error("Failed to convert/emit canvas frame:", err);
@@ -156,6 +157,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
           const wavBuffer = encodeWAV(inputBuffer, audioContextRef.current.sampleRate);
           const base64Wav = arrayBufferToBase64(wavBuffer);
           
+          console.log(`Emitting stream_audio, size: ${base64Wav.length} chars`);
           socketRef.current?.emit("stream_audio", { streamId: appointmentId, audio: base64Wav });
         };
 
@@ -442,12 +444,14 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
 
         // Fallback Listeners: receive frames and play them if WebRTC is not connected
         socket.on("stream_frame", ({ senderSocketId, frame }) => {
+          console.log(`Received stream_frame from ${senderSocketId}, size: ${frame?.length} chars`);
           // If WebRTC is currently connected, ignore incoming fallback frames
           if (peerConnectionRef.current?.iceConnectionState === "connected") return;
           setRemoteFrame(frame);
         });
 
         socket.on("stream_audio", ({ senderSocketId, audio }) => {
+          console.log(`Received stream_audio from ${senderSocketId}, size: ${audio?.length} chars`);
           if (peerConnectionRef.current?.iceConnectionState === "connected") return;
           playAudioChunk(audio);
         });
