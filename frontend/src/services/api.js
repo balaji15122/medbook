@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+let API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+if (API_BASE_URL.startsWith('http') && !API_BASE_URL.endsWith('/api')) {
+  API_BASE_URL = `${API_BASE_URL.replace(/\/$/, '')}/api`;
+}
 
 /**
  * Standard HTTP request wrapper
