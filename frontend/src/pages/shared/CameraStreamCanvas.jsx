@@ -498,7 +498,7 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
         socket.off("user-left");
       }
     };
-  }, [appointmentId, facingMode, cleanUp, createPeerConnection, initiateCall, startFallbackBroadcasting, stopFallbackBroadcasting, playAudioChunk]);
+  }, [appointmentId, facingMode]);
 
   // Feed binding effects
   useEffect(() => {
@@ -512,6 +512,15 @@ export const CameraStreamCanvas = ({ appointmentId, user, onEndCall }) => {
       remoteVideoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream, peerJoined]);
+
+  // Reactive Fallback Hook: Activates fallback automatically when peer has joined and connection is not connected
+  useEffect(() => {
+    if (peerJoined && connStatus !== "connected") {
+      startFallbackBroadcasting();
+    } else {
+      stopFallbackBroadcasting();
+    }
+  }, [peerJoined, connStatus, startFallbackBroadcasting, stopFallbackBroadcasting]);
 
   // Toggle controls
   const toggleAudio = useCallback(() => {
