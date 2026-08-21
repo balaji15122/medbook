@@ -1,56 +1,28 @@
-import crypto from "crypto";
+import crypto from 'crypto';
+import razorpayInstance from '../config/razorpay.js';
 
 /**
- * Create a payment order / reference
+ * Create a real Razorpay Order
  * @param {object} params
- * @param {number} params.amount - in Rupees or currency unit
- * @param {string} params.receipt - receipt ID / appointment ID
- * @param {string} [params.currency] - default 'INR'
+ * @param {number} params.amount - in Rupees
+ * @param {string} params.receipt - unique receipt identifier
+ * @param {object} [params.notes] - optional metadata
+ * @returns {Promise<object>}
  */
-export const createPaymentOrder = async ({ amount, receipt, currency = "INR" }) => {
+export const createOrder = async ({ amount, receipt, notes = {} }) => {
   try {
-    // If Razorpay keys are provided and razorpay SDK is installed, use Razorpay
-    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-      try {
-        const Razorpay = (await import("razorpay")).default;
-        const instance = new Razorpay({
-          key_id: process.env.RAZORPAY_KEY_ID,
-          key_secret: process.env.RAZORPAY_KEY_SECRET,
-        });
-
-        const options = {
-          amount: Math.round(amount * 100), // Amount in paise
-          currency,
-          receipt,
-        };
-
-        const order = await instance.orders.create(options);
-        return {
-          id: order.id,
-          amount: order.amount,
-          currency: order.currency,
-          receipt: order.receipt,
-          status: order.status,
-          isSimulated: false,
-        };
-      } catch (err) {
-        console.warn("Razorpay order creation fallback:", err.message);
-      }
-    }
-
-    // Default simulated order
-    const simulatedOrderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    return {
-      id: simulatedOrderId,
-      amount: Math.round(amount * 100),
-      currency,
+    const options = {
+      amount: Math.round(amount * 100), // Amount in paise
+      currency: 'INR',
       receipt,
-      status: "created",
-      isSimulated: true,
+      notes,
     };
+
+    const order = await razorpayInstance.orders.create(options);
+    return order;
   } catch (error) {
-    console.error("Payment Order Error:", error.message);
-    throw error;
+    console.error('Razorpay Create Order Error:', error);
+    throw new Error(`Razorpay order creation failed: ${error.message}`);
   }
 };
 
@@ -62,24 +34,36 @@ export const createPaymentOrder = async ({ amount, receipt, currency = "INR" }) 
  * @returns {boolean}
  */
 export const verifyPaymentSignature = (orderId, paymentId, signature) => {
-  if (!orderId || !paymentId) return false;
+  if (!orderId || !paymentId || !signature) return false;
 
-  // If Razorpay secret is set, verify HMAC
-  if (process.env.RAZORPAY_KEY_SECRET && signature) {
-    const text = `${orderId}|${paymentId}`;
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(text)
-      .digest("hex");
+  const text = `${orderId}|${paymentId}`;
+  const generatedSignature = crypto
+    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+    .update(text)
+    .digest('hex');
 
-    return generatedSignature === signature;
-  }
+  return generatedSignature === signature;
+};
 
-  // For testing / simulated mode or cash payments
-  return Boolean(paymentId);
+/**
+ * Verify webhook signature
+ * @param {Buffer|string} rawBody - Raw request body
+ * @param {string} signature - x-razorpay-signature header
+ * @param {string} webhookSecret - webhook secret key
+ * @returns {boolean}
+ */
+export const verifyWebhookSignature = (rawBody, signature, webhookSecret) => {
+  if (!rawBody || !signature || !webhookSecret) return false;
+
+  const shasum = crypto.createHmac('sha256', webhookSecret);
+  shasum.update(rawBody);
+  const digest = shasum.digest('hex');
+
+  return digest === signature;
 };
 
 export default {
-  createPaymentOrder,
+  createOrder,
   verifyPaymentSignature,
+  verifyWebhookSignature,
 };

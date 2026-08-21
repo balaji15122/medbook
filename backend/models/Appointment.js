@@ -62,6 +62,16 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+
+    roomId: {
+      type: String,
+      default: null,
+    },
+
+    callEndedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

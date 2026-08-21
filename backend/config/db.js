@@ -5,8 +5,7 @@ const connectDB = async () => {
   try {
     // Database name goes before '?' -> mongodb.net/<databaseName>?<queryParams>
     const mongoUri =
-      process.env.MONGO_URI ||
-      "mongodb+srv://balaji241512_db_user:Balaji123@cluster0.7cibvlc.mongodb.net/medbook?appName=Cluster0";
+      process.env.MONGO_URI;
 
     const conn = await mongoose.connect(mongoUri);
     console.log(`MongoDB Connected: ${conn.connection.host}`);

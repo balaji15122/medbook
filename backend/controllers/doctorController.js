@@ -2,6 +2,7 @@ import Doctor from "../models/Doctor.js";
 import User from "../models/User.js";
 import Appointment from "../models/Appointment.js";
 import Review from "../models/Review.js";
+import Payment from "../models/Payment.js";
 
 // ================= GET ALL DOCTORS =================
 export const getAllDoctors = async (req, res) => {
@@ -18,7 +19,7 @@ export const getAllDoctors = async (req, res) => {
     } = req.query;
 
     const filter = {
-      isVerified: true,
+      isVerified: req.query.isVerified !== undefined ? req.query.isVerified === "true" : true,
     };
 
     if (isAvailable !== undefined) {
@@ -46,10 +47,21 @@ export const getAllDoctors = async (req, res) => {
     }
 
     if (search) {
-      filter.$or = [
-        { specialization: { $regex: search, $options: "i" } },
-        { hospital: { $regex: search, $options: "i" } },
-        { city: { $regex: search, $options: "i" } },
+      // Find matching users by name
+      const matchingUsers = await User.find({
+        name: { $regex: search, $options: "i" },
+      }).select("_id");
+      const matchingUserIds = matchingUsers.map((u) => u._id);
+
+      filter.$and = [
+        {
+          $or: [
+            { user: { $in: matchingUserIds } },
+            { specialization: { $regex: search, $options: "i" } },
+            { hospital: { $regex: search, $options: "i" } },
+            { city: { $regex: search, $options: "i" } },
+          ],
+        },
       ];
     }
 
@@ -59,7 +71,7 @@ export const getAllDoctors = async (req, res) => {
       .populate("user", "name email profileImage")
       .skip(skip)
       .limit(Number(limit))
-      .sort({ rating: -1, totalReviews: -1 });
+      .sort({ isVerified: -1, rating: -1, totalReviews: -1, createdAt: -1 });
 
     const total = await Doctor.countDocuments(filter);
 
@@ -169,6 +181,13 @@ export const updateDoctorProfile = async (req, res) => {
       profileImage,
       isAvailable,
     } = req.body;
+
+    if (!profileImage) {
+      return res.status(400).json({
+        success: false,
+        message: "Doctor profile photo is required",
+      });
+    }
 
     // Update user name / profileImage if given
     if (name || profileImage !== undefined) {
@@ -300,6 +319,54 @@ export const getDoctorStats = async (req, res) => {
       Appointment.countDocuments({ doctor: doctor._id, status: "cancelled" }),
     ]);
 
+    // Fetch all completed payments for this doctor to calculate earnings
+    const payments = await Payment.find({
+      doctor: doctor._id,
+      status: "completed",
+    });
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thisYearStart = new Date(now.getFullYear(), 0, 1);
+
+    let dailyEarnings = 0;
+    let monthlyEarnings = 0;
+    let yearlyEarnings = 0;
+
+    // Generate monthly buckets for the last 6 months
+    const monthlyBuckets = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.toLocaleString("default", { month: "short", year: "numeric" });
+      monthlyBuckets[key] = 0;
+    }
+
+    payments.forEach((payment) => {
+      const payDate = new Date(payment.createdAt);
+      const amount = payment.amount || 0;
+
+      if (payDate >= todayStart) {
+        dailyEarnings += amount;
+      }
+      if (payDate >= thisMonthStart) {
+        monthlyEarnings += amount;
+      }
+      if (payDate >= thisYearStart) {
+        yearlyEarnings += amount;
+      }
+
+      const monthKey = payDate.toLocaleString("default", { month: "short", year: "numeric" });
+      if (monthlyBuckets[monthKey] !== undefined) {
+        monthlyBuckets[monthKey] += amount;
+      }
+    });
+
+    const earningsChartData = Object.keys(monthlyBuckets).map((key) => ({
+      label: key,
+      amount: monthlyBuckets[key],
+    }));
+
     return res.status(200).json({
       success: true,
       stats: {
@@ -310,6 +377,10 @@ export const getDoctorStats = async (req, res) => {
         cancelledAppointments,
         rating: doctor.rating,
         totalReviews: doctor.totalReviews,
+        dailyEarnings,
+        monthlyEarnings,
+        yearlyEarnings,
+        earningsChartData,
       },
     });
   } catch (error) {

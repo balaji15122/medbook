@@ -4,6 +4,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import connectDB from "./config/db.js";
+import http from "http";
+import { Server } from "socket.io";
+import videoCallSocket from "./sockets/videoCallSocket.js";
 
 // Import route handlers
 import authRoutes from "./routes/authRoutes.js";
@@ -28,7 +31,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Connect to Database
 connectDB();
@@ -42,7 +45,16 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "10mb" }));
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, res, buf) => {
+      if (req.originalUrl.startsWith('/api/payments/webhook')) {
+        req.rawBody = buf;
+      }
+    }
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Static directory for file uploads
@@ -95,8 +107,23 @@ app.use("/api/admin", adminRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
+// Create HTTP server
+const server = http.createServer(app);
+
+// Initialize Socket.IO with CORS support
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  },
+});
+
+// Configure Video Call sockets
+videoCallSocket(io);
+
 // Start Server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 

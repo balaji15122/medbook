@@ -8,6 +8,8 @@ import {
   confirmAppointment,
   cancelAppointment,
   completeAppointment,
+  getJoinToken,
+  endVideoCall,
 } from "../controllers/appointmentController.js";
 import authMiddleware from "../middlewares/authMiddleware.js";
 import roleMiddleware from "../middlewares/roleMiddleware.js";
@@ -59,6 +61,20 @@ router.put(
   "/:id/cancel",
   authMiddleware,
   cancelAppointment
+);
+
+// Get join-token for video consultation
+router.get(
+  "/:id/join-token",
+  authMiddleware,
+  getJoinToken
+);
+
+// End video call session
+router.put(
+  "/:id/end-call",
+  authMiddleware,
+  endVideoCall
 );
 
 // Get single appointment

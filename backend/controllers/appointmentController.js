@@ -3,6 +3,8 @@ import Doctor from "../models/Doctor.js";
 import Patient from "../models/Patient.js";
 import Availability from "../models/Availability.js";
 import User from "../models/User.js";
+import jwt from "jsonwebtoken";
+import { JOIN_BUFFER_MINUTES } from "../config/videoCallConfig.js";
 import { isSlotAvailable, getAvailableSlotsForDoctor } from "../services/appointmentService.js";
 import { createNotification, notifyAppointmentUpdate } from "../services/notificationService.js";
 import { sendAppointmentEmail } from "../services/emailService.js";
@@ -503,6 +505,171 @@ export const completeAppointment = async (req, res) => {
   }
 };
 
+export const getJoinToken = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
+
+    if (appointment.status !== "confirmed") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot join video consultation unless appointment is confirmed",
+      });
+    }
+
+    const patient = await Patient.findOne({ user: userId });
+    const doctor = await Doctor.findOne({ user: userId });
+
+    const isPatient = patient && appointment.patient.toString() === patient._id.toString();
+    const isDoctor = doctor && appointment.doctor.toString() === doctor._id.toString();
+
+    if (!isPatient && !isDoctor) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to join this consultation room",
+      });
+    }
+
+    const apptDate = new Date(appointment.appointmentDate);
+    const [startHours, startMinutes] = appointment.startTime.split(":").map(Number);
+    const [endHours, endMinutes] = appointment.endTime.split(":").map(Number);
+
+    const startTimeDate = new Date(Date.UTC(
+      apptDate.getUTCFullYear(),
+      apptDate.getUTCMonth(),
+      apptDate.getUTCDate(),
+      startHours,
+      startMinutes,
+      0,
+      0
+    ));
+
+    const endTimeDate = new Date(Date.UTC(
+      apptDate.getUTCFullYear(),
+      apptDate.getUTCMonth(),
+      apptDate.getUTCDate(),
+      endHours,
+      endMinutes,
+      0,
+      0
+    ));
+
+    const nowRaw = new Date();
+    const now = new Date(Date.UTC(
+      nowRaw.getFullYear(),
+      nowRaw.getMonth(),
+      nowRaw.getDate(),
+      nowRaw.getHours(),
+      nowRaw.getMinutes(),
+      nowRaw.getSeconds(),
+      0
+    ));
+    const activeStart = new Date(startTimeDate.getTime() - JOIN_BUFFER_MINUTES * 60 * 1000);
+    const activeEnd = endTimeDate;
+
+    if (isPatient) {
+      if (now < activeStart) {
+        return res.status(403).json({
+          success: false,
+          message: "Consultation is not active yet",
+          startTime: startTimeDate.toISOString(),
+        });
+      }
+
+      if (now > activeEnd) {
+        return res.status(403).json({
+          success: false,
+          message: "Consultation session has expired",
+          endTime: endTimeDate.toISOString(),
+        });
+      }
+    }
+
+    const roomId = appointment.roomId || `room_${appointment._id}`;
+    if (!appointment.roomId) {
+      appointment.roomId = roomId;
+      await appointment.save();
+    }
+
+    const token = jwt.sign(
+      {
+        appointmentId: appointment._id,
+        userId: userId,
+        role: req.user.role,
+        roomId: roomId,
+      },
+      process.env.JWT_SECRET || "ERIEUHP9CEDRY7UW347jrdbjbgdhjfbirejheb",
+      { expiresIn: "15m" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      roomId,
+      token,
+    });
+  } catch (error) {
+    console.error("Get join token error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate join token",
+      error: error.message,
+    });
+  }
+};
+
+export const endVideoCall = async (req, res) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
+
+    const patient = await Patient.findOne({ user: userId });
+    const doctor = await Doctor.findOne({ user: userId });
+
+    const isPatient = patient && appointment.patient.toString() === patient._id.toString();
+    const isDoctor = doctor && appointment.doctor.toString() === doctor._id.toString();
+
+    if (!isPatient && !isDoctor) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to perform this action",
+      });
+    }
+
+    appointment.callEndedAt = new Date();
+    if (isDoctor) {
+      appointment.status = "completed";
+    }
+    await appointment.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Video call session ended successfully",
+      appointment,
+    });
+  } catch (error) {
+    console.error("End video call error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to end video call session",
+      error: error.message,
+    });
+  }
+};
+
 export default {
   getAvailableSlots,
   bookAppointment,
@@ -512,4 +679,6 @@ export default {
   confirmAppointment,
   cancelAppointment,
   completeAppointment,
+  getJoinToken,
+  endVideoCall,
 };

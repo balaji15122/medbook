@@ -22,6 +22,7 @@ export const registerUser = async (req, res) => {
       hospital,
       phone,
       city,
+      profileImage,
     } = req.body;
 
     // Check required fields
@@ -36,6 +37,13 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 6 characters long",
+      });
+    }
+
+    if (role.toLowerCase() === "doctor" && !profileImage) {
+      return res.status(400).json({
+        success: false,
+        message: "Doctor profile photo is required",
       });
     }
 
@@ -58,6 +66,7 @@ export const registerUser = async (req, res) => {
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       role: role.toLowerCase(),
+      profileImage: profileImage || "",
     });
 
     let profileData = null;
@@ -83,6 +92,7 @@ export const registerUser = async (req, res) => {
         hospital: hospital || "",
         phone: phone || "",
         city: city || "",
+        profileImage: profileImage || "",
         isVerified: false,
       });
     }

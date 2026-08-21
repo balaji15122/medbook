@@ -1,49 +1,37 @@
-import express from "express";
+import express from 'express';
 import {
-  createOrder,
+  createRazorpayOrder,
   verifyPayment,
+  getPaymentByAppointment,
+  handleRazorpayWebhook,
   getMyPayments,
   getDoctorEarnings,
   getPaymentById,
-} from "../controllers/paymentController.js";
-import authMiddleware from "../middlewares/authMiddleware.js";
-import roleMiddleware from "../middlewares/roleMiddleware.js";
+} from '../controllers/paymentController.js';
+import authMiddleware from '../middlewares/authMiddleware.js';
+import roleMiddleware from '../middlewares/roleMiddleware.js';
 
 const router = express.Router();
 
-// Patient creates payment order
-router.post(
-  "/order",
-  authMiddleware,
-  roleMiddleware("patient"),
-  createOrder
-);
+// Public Webhook listener (exempt from authMiddleware since signature verified with SHA256 secret)
+router.post('/webhook', handleRazorpayWebhook);
 
-// Patient verifies payment
-router.post(
-  "/verify",
-  authMiddleware,
-  roleMiddleware("patient"),
-  verifyPayment
-);
+// Patient creates Razorpay order
+router.post('/create-order', authMiddleware, roleMiddleware('patient'), createRazorpayOrder);
 
-// Patient gets their payments
-router.get(
-  "/my",
-  authMiddleware,
-  roleMiddleware("patient"),
-  getMyPayments
-);
+// Patient verifies signature
+router.post('/verify', authMiddleware, roleMiddleware('patient'), verifyPayment);
 
-// Doctor views earnings
-router.get(
-  "/doctor/earnings",
-  authMiddleware,
-  roleMiddleware("doctor"),
-  getDoctorEarnings
-);
+// Retrieve payment record by appointment ID
+router.get('/appointment/:appointmentId', authMiddleware, getPaymentByAppointment);
 
-// Get single payment
-router.get("/:id", authMiddleware, getPaymentById);
+// Patient fetches their payment history
+router.get('/my', authMiddleware, roleMiddleware('patient'), getMyPayments);
+
+// Doctor fetches their earnings overview
+router.get('/doctor/earnings', authMiddleware, roleMiddleware('doctor'), getDoctorEarnings);
+
+// Single transaction lookup
+router.get('/:id', authMiddleware, getPaymentById);
 
 export default router;
